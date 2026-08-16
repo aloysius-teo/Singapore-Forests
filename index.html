@@ -291,9 +291,71 @@
       });
     });
 
+  function svy21ToLatLng(e, n) {
+    var a = 6378137.0, f = 1 / 298.257223563, b = a * (1 - f);
+    var e2 = (a*a - b*b) / (a*a), e4 = e2*e2, e6 = e2*e2*e2;
+    var ePrime2 = (a*a - b*b) / (b*b);
+    var oLat = 1.366666666666667 * Math.PI / 180, oLon = 103.83333333333333 * Math.PI / 180;
+    var oN = 38744.572, oE = 28001.642, k0 = 1.0;
+    function computeM(lat) {
+      return a * ((1 - e2/4 - 3*e4/64 - 5*e6/256) * lat
+               - (3*e2/8 + 3*e4/32 + 45*e6/1024) * Math.sin(2*lat)
+               + (15*e4/256 + 45*e6/1024) * Math.sin(4*lat)
+               - (35*e6/3072) * Math.sin(6*lat));
+    }
+    var Nprime = n - oN;
+    var Mo = computeM(oLat);
+    var Mprime = Mo + Nprime / k0;
+    var n_val = (a - b) / (a + b);
+    var G = a * (1 - n_val) * (1 - n_val*n_val) * (1 + 9*n_val*n_val/4 + 225*Math.pow(n_val,4)/64) * Math.PI / 180.0;
+    var sigma = Mprime * Math.PI / (180.0 * G);
+    var latPrime = sigma + (3*n_val/2 - 27*Math.pow(n_val,3)/32) * Math.sin(2*sigma)
+                         + (21*n_val*n_val/16 - 55*Math.pow(n_val,4)/32) * Math.sin(4*sigma)
+                         + (151*Math.pow(n_val,3)/96) * Math.sin(6*sigma)
+                         + (1097*Math.pow(n_val,4)/512) * Math.sin(8*sigma);
+    var rhoPrime = a * (1 - e2) / Math.pow(1 - e2 * Math.sin(latPrime)*Math.sin(latPrime), 1.5);
+    var vPrime = a / Math.sqrt(1 - e2 * Math.sin(latPrime)*Math.sin(latPrime));
+    var psiPrime = vPrime / rhoPrime;
+    var tPrime = Math.tan(latPrime);
+    var Eprime = e - oE;
+    var x = Eprime / (k0 * vPrime);
+    var lat = latPrime - (vPrime * tPrime / rhoPrime) * (
+        (x*x / 2)
+        - (Math.pow(x,4) / 24) * (5 + 3*tPrime*tPrime + 10*psiPrime - 4*psiPrime*psiPrime - 9*ePrime2)
+        + (Math.pow(x,6) / 720) * (61 + 90*tPrime*tPrime + 298*psiPrime + 45*Math.pow(tPrime,4) - 252*ePrime2 - 3*psiPrime*psiPrime)
+    );
+    var lon = oLon + (1 / Math.cos(latPrime)) * (
+        x
+        - (Math.pow(x,3) / 6) * (1 + 2*tPrime*tPrime + psiPrime)
+        + (Math.pow(x,5) / 120) * (5 - 2*psiPrime + 28*tPrime*tPrime - 3*psiPrime*psiPrime + 8*ePrime2 + 24*Math.pow(tPrime,4))
+    );
+    return [lon * 180 / Math.PI, lat * 180 / Math.PI];
+  }
+
+  function normalizeGeoJSON(gj) {
+    function processCoords(c) {
+      if (typeof c[0] === "number") {
+        if (c[0] > 180 || c[1] > 180) {
+          return svy21ToLatLng(c[0], c[1]);
+        }
+        return c;
+      }
+      return c.map(processCoords);
+    }
+    if (gj && gj.features) {
+      gj.features.forEach(function(f) {
+        if (f.geometry && f.geometry.coordinates) {
+          f.geometry.coordinates = processCoords(f.geometry.coordinates);
+        }
+      });
+    }
+    return gj;
+  }
+
   fetch("data/earmarked_forests.geojson")
     .then(function (r) { return r.json(); })
     .then(function (gj) {
+      gj = normalizeGeoJSON(gj);
       earmarkedLayer = L.geoJSON(gj, {
         style: function () { return { color: "#dc2626", weight: 3.25, fillOpacity: 0 }; },
         onEachFeature: function (f, l) { l.bindTooltip(f.properties.Forest_Name || "Forest site", { sticky: true }); }
